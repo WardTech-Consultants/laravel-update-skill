@@ -1,6 +1,6 @@
 ---
 name: laravel-update
-description: Safely apply Laravel core and Composer dependency updates on any Laravel project (API-only, Blade, Livewire, or Inertia). Use when the user pastes a list of outdated packages, asks to update Laravel / Composer / dependencies, asks whether an update is safe to deploy, or asks for a go-live decision on a dependency bump. Runs a baseline test pass, updates, re-tests, hunts for breaking changes, gives a GO / NO-GO verdict, and commits only when green.
+description: Safely apply Laravel core, Composer, and npm dependency updates on any Laravel project (API-only, Blade, Livewire, or Inertia). Use when the user pastes a list of outdated packages, asks to update Laravel / Composer / npm / dependencies, asks whether an update is safe to deploy, or asks for a go-live decision on a dependency bump. Runs a baseline test pass, updates, re-tests, hunts for breaking changes, gives a GO / NO-GO verdict, and commits only when green.
 ---
 
 # Laravel & Composer update
@@ -24,6 +24,7 @@ Every project differs. Detect before assuming:
 | Static analysis? | `phpstan.neon*`, `larastan`, `psalm.xml`, `rector.php` |
 | Formatter? | `pint.json` or `laravel/pint` in require-dev |
 | Assets? | `vite.config.*` → `npm run build` is part of verification |
+| npm deps? | `package.json` → Phase 8 applies, as a second pass with its own commit |
 
 Record the exact commands you will use. Use them consistently in both test phases — a baseline
 run with different flags than the after run proves nothing.
@@ -104,8 +105,9 @@ Rules:
 - Do **not** use `-W` / `--with-all-dependencies` unless you are deliberately bumping a direct
   constraint and have said so.
 - Do **not** hand-edit `composer.json` constraints to chase a Red package in this pass.
-- If the project has npm dependencies, keep them in a **separate** step and a separate commit
-  unless the user asked for both. Mixing them makes bisecting a failure much harder.
+- Do **not** touch npm here. If the project has npm dependencies they get their own pass and
+  their own commit — Phase 8. Mixing the two makes a failure much harder to bisect, because a
+  white-screen deploy could be either the framework or the asset pipeline.
 
 Then clear stale state — cached config/routes/views compiled against the old code cause
 failures that look like real breakage:
@@ -226,3 +228,70 @@ Test suite: <X> passed before and after; <e2e status>.
 
 Do not add "Generated with Claude Code" trailers unless the project's other commits use them.
 Never `git push` unless asked.
+
+## Phase 8 — npm, as a second pass
+
+Only if the project has a `package.json`, and only **after** the Composer commit has landed
+green. Same discipline, same evidence, separate commit. Skip entirely if the user asked only
+about Composer — but tell them npm is also outdated if it is, rather than silently ignoring it.
+
+**Read the columns properly.** `npm outdated` gives you the triage for free:
+
+```
+Package  Current  Wanted  Latest
+vite     8.1.4    8.1.9   9.0.1
+```
+
+- **Current → Wanted** — allowed by your `package.json` range. Routine; `npm update` takes it.
+- **Wanted → Latest** — a major outside the range. Needs a deliberate `npm install pkg@latest`
+  and a range edit. Treat exactly like a Red in Phase 2: not part of this pass.
+
+`npm outdated` exits **1** when anything is outdated. That is not an error — don't report it as one.
+
+```
+npm outdated            # triage
+npm update              # moves to Wanted, within existing ranges
+npm audit               # advisories; note that dev-only ones rarely warrant a forced upgrade
+```
+
+Never run `npm audit fix --force`. It installs major versions to clear advisories and will
+happily break your build to silence a warning in a dev dependency that never reaches production.
+
+**Verification is the build, not a test suite.** There is usually no npm-side unit test in a
+Laravel project, so the real checks are:
+
+```
+npm run build           # must succeed
+```
+
+Then confirm `public/build/manifest.json` regenerated, and re-run the browser/E2E suite from
+Phase 1. A stale or malformed manifest produces an unstyled page or a white screen with **no
+server-side error** — nothing in the PHP suite will catch it.
+
+**Node's own floor moves.** Vite and Tailwind majors routinely raise the minimum Node version.
+Check `engines` in `package.json` and, more importantly, the Node version on the deploy target.
+A build that works locally and fails in CI is almost always this.
+
+### Stack-specific traps
+
+- **Inertia** — `@inertiajs/*` and `inertiajs/inertia-laravel` are two halves of one protocol. A
+  Composer-only or npm-only pass can desync them. Check both versions agree before shipping
+  either; this is the single most common Inertia breakage.
+- **Tailwind** — v3 → v4 is a config and directive rewrite, not a version bump. Its own project.
+- **Vite** — majors often break `laravel-vite-plugin` compatibility. Check the plugin supports
+  the new major *before* updating Vite, not after.
+- **Playwright** — bumping `@playwright/test` may need `npx playwright install` for matching
+  browsers, or the suite fails in a way that looks like an app regression.
+
+### Commit
+
+Separate from the Composer commit, `package.json` + `package-lock.json` only:
+
+```
+Update npm dependencies
+
+Update <N> packages, including <notable>.
+
+Held at current majors: <list, with what each would require>.
+Build succeeded and <e2e status>.
+```

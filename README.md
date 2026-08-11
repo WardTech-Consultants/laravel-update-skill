@@ -15,6 +15,7 @@ Paste a list of outdated packages (or nothing at all) and it will:
 6. Hunt for breaking changes in the seams that thin test suites miss
 7. Report **GO / GO WITH CONDITIONS / NO-GO**, stating explicitly what was *not* tested
 8. Commit only when green
+9. Then repeat for npm, as a **separate** pass with its own commit
 
 ## Install
 
@@ -108,7 +109,8 @@ Two choices are baked in that you may want to change in `SKILL.md`:
 
 - Updates commit to the **current branch**, no update branch, on the reasoning that a
   lockfile-only commit is trivially revertible.
-- npm dependencies are kept to a **separate** commit unless you ask for both, so a failure stays
+- npm is a **second pass with its own commit**, run only after the Composer commit is green. A
+  white-screen deploy could be the framework or the asset pipeline; separate commits keep that
   bisectable.
 
 ## License
