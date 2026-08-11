@@ -1,6 +1,6 @@
 # laravel-update
 
-A [Claude Code](https://claude.com/claude-code) skill that applies Laravel and Composer
+A [Claude Code](https://claude.com/claude-code) skill that applies Laravel, Composer, and npm
 dependency updates and ends with a **go-live verdict** backed by a before/after test comparison —
 not just a green `composer update`.
 
@@ -31,22 +31,83 @@ To update later: `git -C ~/.claude/skills/laravel-update pull`
 
 ## Use
 
-In any Laravel project, either paste a `composer outdated` table:
+Start Claude Code in any Laravel project and ask in plain language. There is nothing to
+configure — Phase 0 detects the runtime, test runner, and stack before it touches anything.
+
+### Composer
+
+Ask for it:
+
+```
+update the composer packages
+```
+
+Or paste a `composer outdated` table — from the CLI, or from a dashboard that reports it:
 
 ```
 Name              Installed   Latest    Status
 laravel/framework v12.4.0     12.9.1    Outdated
-...
+guzzlehttp/guzzle 7.14.0      8.0.2     Outdated
 ```
 
-or invoke it directly:
+Or invoke it by name, with no list at all:
 
 ```
 /laravel-update
 ```
 
-With no list it runs `composer outdated` itself. Either way `composer.lock` is treated as the
+It runs `composer outdated` itself when you don't supply one. Either way `composer.lock` is the
 source of truth, so a stale or partial list won't mislead it.
+
+### npm
+
+Same skill, Phase 8. Ask for it:
+
+```
+update the npm packages
+```
+
+Or paste `npm outdated`:
+
+```
+Package             Current  Wanted  Latest
+vite                8.1.4    8.2.1   8.2.1
+tailwindcss         4.3.2    4.3.3   4.3.3
+```
+
+`npm outdated` exits **1** whenever anything is outdated — that is not an error, and the skill
+won't treat it as one.
+
+### Both
+
+```
+update composer and npm
+```
+
+Runs Composer through to a commit, then npm through to a **second, separate** commit. The order
+matters and the separation matters: a white-screen deploy could be the framework or the asset
+pipeline, and two commits let you revert one and know immediately which it was.
+
+You don't need Composer to have run first. Phase 8 stands alone — "after the Composer commit" only
+means *if you're doing both, do them in that order*.
+
+### What you get back
+
+A go-live report, not a wall of terminal output:
+
+```
+## Verdict: GO
+
+31 packages, zero major bumps, laravel/framework v13.19.0 -> v13.24.0.
+Closes 12 security advisories (composer audit: 12 -> 0).
+
+Held back (expected):  guzzle 8.x, brick/math 0.19  -- pinned by laravel/framework
+Tests:                 13 passed before and after; E2E identical per browser
+Untested surface:      real SMTP delivery, live reCAPTCHA
+```
+
+Followed by a commit, if you got a GO. If you got a NO-GO, a numbered remediation plan instead —
+cause, fix, effort, and whether it can be deferred.
 
 ## Why the verdict, not just the update
 
